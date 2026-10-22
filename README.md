@@ -100,9 +100,36 @@ GET /api/reports?day=7
 `Services/ReportingService.cs` for how the day parameter is used to look up
 sales data.
 
+## Azure deployment
+
+| Resource | Name |
+|----------|------|
+| Resource group | `rg-ignite2026-sreagent-demo` |
+| Demo Web App (runs the app, `WEBSITE_RUN_FROM_PACKAGE`) | `ignite2026-sreagent-app` |
+| File-host Web App (serves `webapp.zip` from its `wwwroot`) | `ignite2026-sreagent-demo` |
+
+The demo Web App has its `WEBSITE_RUN_FROM_PACKAGE` App Setting pointed at
+`https://ignite2026-sreagent-demo-cfgsgac8h8abh2d9.westus3-01.azurewebsites.net/webapp.zip`,
+which is hosted as a plain file in the file-host site's `wwwroot/`. The demo
+app's own code is therefore never writable in place — it only reads a zip
+over HTTPS — which is what makes the "agent can't just hot-patch the
+running site" constraint real for this lab.
+
 ## Publishing a new package
 
-See `scripts/publish-webapp-zip.ps1` for the script that builds this repo
-and publishes the resulting package to the URL this Web App's
-`WEBSITE_RUN_FROM_PACKAGE` setting points at. Use it after merging a fix PR
-to actually ship the change.
+`scripts/publish-webapp-zip.ps1` builds this repo, zips the publish output,
+and uploads it to the file-host site's `wwwroot/webapp.zip` via the Kudu VFS
+API (authenticated with your own `az login` session — no secrets are stored
+anywhere). Use it after merging a fix PR to actually ship the change:
+
+```powershell
+.\scripts\publish-webapp-zip.ps1 `
+    -ResourceGroup rg-ignite2026-sreagent-demo `
+    -FileHostSiteName ignite2026-sreagent-demo `
+    -DemoSiteName ignite2026-sreagent-app `
+    -RestartSite
+```
+
+`-RestartSite` restarts the demo Web App afterward so it reloads the new
+package immediately; omit it if you'd rather let the app pick it up on its
+own next restart/scale event.
