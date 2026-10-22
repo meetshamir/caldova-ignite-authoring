@@ -24,3 +24,8 @@ button:disabled { cursor: wait; opacity: .65; }
 .data-table { width: 100%; border-collapse: collapse; margin-top: 12px; }
 .data-table th, .data-table td { text-align: left; padding: 8px 10px; border-bottom: 1px solid #dce5ef; font-size: 14px; }
 .data-table th { color: #607086; font-size: 12px; text-transform: uppercase; letter-spacing: .04em; }
+.pagination { display: flex; gap: 6px; align-items: center; margin-top: 14px; flex-wrap: wrap; }
+.pagination a { color: #0e7490; text-decoration: none; font-weight: 600; padding: 5px 9px; border-radius: 6px; border: 1px solid #dce5ef; }
+.pagination a:hover { background: #eef4f8; }
+.pagination a.active { background: #0e7490; color: white; border-color: #0e7490; }
+.pagination .ellipsis { color: #607086; padding: 0 4px; }

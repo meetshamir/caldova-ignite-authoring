@@ -74,33 +74,71 @@ function productsTable(products) {
   </table>`;
 }
 
+function pageLinks(currentPage, totalPages) {
+  if (totalPages <= 1) {
+    return "";
+  }
+  const pageNumbers = new Set([1, totalPages, currentPage]);
+  for (let delta = 1; delta <= 2; delta++) {
+    if (currentPage - delta >= 1) pageNumbers.add(currentPage - delta);
+    if (currentPage + delta <= totalPages) pageNumbers.add(currentPage + delta);
+  }
+  const sorted = [...pageNumbers].sort((a, b) => a - b);
+
+  let html = `<nav class="pagination">`;
+  if (currentPage > 1) {
+    html += `<a href="#" data-page="${currentPage - 1}">&laquo; Prev</a>`;
+  }
+  let previous = 0;
+  for (const pageNumber of sorted) {
+    if (previous && pageNumber - previous > 1) {
+      html += `<span class="ellipsis">&hellip;</span>`;
+    }
+    const activeClass = pageNumber === currentPage ? " active" : "";
+    html += `<a href="#" class="page-link${activeClass}" data-page="${pageNumber}">${pageNumber}</a>`;
+    previous = pageNumber;
+  }
+  if (currentPage < totalPages) {
+    html += `<a href="#" data-page="${currentPage + 1}">Next &raquo;</a>`;
+  }
+  html += `</nav>`;
+  return html;
+}
+
 function renderSearch() {
   app.innerHTML = `<section class="panel">
-    <h2>Catalog</h2>
-    <p class="meta">Browse the full product catalog, 20 items per page.</p>
-    <form id="browse-form"><input id="browse-page" type="text" placeholder="Page (e.g. 1)" value="1"> <button type="submit">Browse</button></form>
-    <div id="browse-results"></div>
-  </section>
-  <section class="panel">
     <h2>Search by product name</h2>
     <form id="namesearch-form"><input id="namesearch-query" type="text" placeholder="e.g. Trail Jacket"> <button type="submit">Search</button></form>
     <div id="namesearch-results"></div>
+  </section>
+  <section class="panel">
+    <h2>Catalog</h2>
+    <p class="meta">Browse the full product catalog, 20 items per page.</p>
+    <div id="browse-results"></div>
   </section>`;
 
-  document.getElementById("browse-form").addEventListener("submit", async (event) => {
-    event.preventDefault();
-    const page = document.getElementById("browse-page").value;
-    const results = document.getElementById("browse-results");
-    results.innerHTML = `<p class="meta">Loading&hellip;</p>`;
+  const browseResults = document.getElementById("browse-results");
+
+  async function loadBrowsePage(page) {
+    browseResults.innerHTML = `<p class="meta">Loading&hellip;</p>`;
     try {
       const result = await getJson(`/api/search?page=${encodeURIComponent(page)}`);
-      results.innerHTML = `<p class="meta">Page ${escapeHtml(result.page)} &middot; ${escapeHtml(result.totalCount)} products total</p>
-        ${productsTable(result.products)}`;
+      const totalPages = Math.max(1, Math.ceil(result.totalCount / result.pageSize));
+      browseResults.innerHTML = `<p class="meta">Page ${escapeHtml(result.page)} of ${totalPages} &middot; ${escapeHtml(result.totalCount)} products total</p>
+        ${productsTable(result.products)}
+        ${pageLinks(result.page, totalPages)}`;
+      browseResults.querySelectorAll("a[data-page]").forEach((link) => {
+        link.addEventListener("click", (event) => {
+          event.preventDefault();
+          loadBrowsePage(Number(link.dataset.page));
+        });
+      });
     } catch (error) {
-      results.innerHTML = errorPanel(error.status || 500, "Catalog unavailable", error.message);
+      browseResults.innerHTML = errorPanel(error.status || 500, "Catalog unavailable", error.message);
     }
-  });
-  document.getElementById("browse-form").dispatchEvent(new Event("submit"));
+  }
+
+  loadBrowsePage(1);
 
   document.getElementById("namesearch-form").addEventListener("submit", async (event) => {
     event.preventDefault();
