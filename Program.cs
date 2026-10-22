@@ -1,23 +1,19 @@
-// Caldova Retail Ops - dependency-free ASP.NET Core Web API.
+// Caldova Retail Ops - ASP.NET Core Web API.
 //
-// Designed for Azure App Service deployed via Run From Package (Run From
-// Zip): the published output needs no NuGet packages beyond the ASP.NET
-// Core shared framework. A static HTML/CSS/JS frontend lives in wwwroot
-// and calls these JSON endpoints.
-//
-// Several endpoints read App Settings (environment variables) so an SRE
-// Agent demo can "break" and "fix" the site purely through Azure
-// configuration changes, without ever touching the code in this repo.
+// Deployed to Azure App Service via Run From Package (Run From Zip). A
+// static HTML/CSS/JS frontend lives in wwwroot and calls these JSON
+// endpoints.
+
+using CaldovaRetailOps.Services;
 
 var builder = WebApplication.CreateBuilder(args);
+builder.Services.AddSingleton<RecommendationEngine>();
+builder.Services.AddSingleton<SearchService>();
+builder.Services.AddSingleton<ReportingService>();
 var app = builder.Build();
 
 const string Service = "caldova-retail-ops";
 var startedAt = DateTimeOffset.UtcNow;
-
-// In-memory store used by the memory-leak demo scenario. Intentionally never
-// cleared so it can simulate unbounded memory growth over time.
-var leakedBuffers = new List<byte[]>();
 
 app.Use(async (context, next) =>
 {
@@ -51,20 +47,17 @@ app.MapGet("/api/status", () => Results.Json(new
     uptimeSeconds = (int)(DateTimeOffset.UtcNow - startedAt).TotalSeconds,
     dotnetVersion = Environment.Version.ToString(),
     instance = Environment.GetEnvironmentVariable("WEBSITE_INSTANCE_ID") is { Length: > 0 } id ? id[..Math.Min(8, id.Length)] : "local",
-    reportsCached = leakedBuffers.Count,
     flags = new
     {
-        BreakMyWebApp = Environment.GetEnvironmentVariable("BreakMyWebApp"),
-        SlowResponseMs = Environment.GetEnvironmentVariable("SlowResponseMs"),
-        EnableMemoryLeak = Environment.GetEnvironmentVariable("EnableMemoryLeak"),
-        DisableRecommendations = Environment.GetEnvironmentVariable("DisableRecommendations")
+        BreakMyWebApp = Environment.GetEnvironmentVariable("BreakMyWebApp")
     }
 }));
 
 app.MapGet("/api/checkout", () =>
 {
     // Demo scenario: set the App Setting BreakMyWebApp=1 to make checkout
-    // fail with an HTTP 500, without any code change or redeploy.
+    // fail with an HTTP 500, without any code change or redeploy. This is
+    // the one purely-configuration-driven scenario in this app.
     if (IsFlagOn("BreakMyWebApp"))
     {
         Console.Error.WriteLine($"caldova_checkout_failed service={Service} reason=BreakMyWebApp_app_setting_enabled");
@@ -74,67 +67,23 @@ app.MapGet("/api/checkout", () =>
     return Results.Json(new { orderId = "CAL-10482", items = 3, total = 142.50, status = "confirmed" });
 });
 
-app.MapGet("/api/search", async () =>
-{
-    // Demo scenario: set the App Setting SlowResponseMs=<milliseconds> to
-    // make product search respond slowly, simulating a performance
-    // degradation incident that an SRE Agent can diagnose via latency
-    // telemetry.
-    var delayMs = int.TryParse(Environment.GetEnvironmentVariable("SlowResponseMs"), out var ms) ? ms : 0;
-    if (delayMs > 0)
-    {
-        await Task.Delay(delayMs);
-    }
+app.MapGet("/api/search", (HttpRequest request, SearchService search) =>
+    Results.Json(search.Search(request.Query["page"].ToString())));
 
-    return Results.Json(new
-    {
-        delayMs,
-        products = new[]
-        {
-            new { sku = "CAL-001", name = "Trail Runner Boot", price = 89.00 },
-            new { sku = "CAL-014", name = "Alpine Shell Jacket", price = 210.00 },
-            new { sku = "CAL-027", name = "Summit Pack 28L", price = 129.00 }
-        }
-    });
+app.MapGet("/api/reports", (HttpRequest request, ReportingService reporting) =>
+{
+    var day = int.TryParse(request.Query["day"].ToString(), out var parsedDay) ? parsedDay : 1;
+    return Results.Json(reporting.GetDailySales(day));
 });
 
-app.MapGet("/api/reports", () =>
+app.MapGet("/api/recommendations", (HttpRequest request, RecommendationEngine engine) =>
 {
-    // Demo scenario: set the App Setting EnableMemoryLeak=1 so every request
-    // retains a buffer that is never released, simulating a slow memory leak
-    // that climbs worker memory over time (visible in App Service metrics).
-    if (IsFlagOn("EnableMemoryLeak"))
+    var customerId = request.Query["customerId"].ToString();
+    if (string.IsNullOrWhiteSpace(customerId))
     {
-        leakedBuffers.Add(new byte[5 * 1024 * 1024]); // retain 5MB per request
+        customerId = "RETURNING-0001";
     }
-
-    return Results.Json(new
-    {
-        periodDays = 7,
-        orders = 1204,
-        revenue = 86310.00,
-        reportsCached = leakedBuffers.Count
-    });
-});
-
-app.MapGet("/api/recommendations", () =>
-{
-    // Demo scenario: set the App Setting DisableRecommendations=1 to
-    // simulate a feature-flag misconfiguration where a route starts
-    // returning HTTP 404.
-    if (IsFlagOn("DisableRecommendations"))
-    {
-        return Results.Json(new { error = "not_found", detail = "This feature is currently disabled." }, statusCode: 404);
-    }
-
-    return Results.Json(new
-    {
-        items = new[]
-        {
-            new { sku = "CAL-055", name = "Insulated Gloves", price = 32.00 },
-            new { sku = "CAL-061", name = "Wool Base Layer", price = 48.00 }
-        }
-    });
+    return Results.Json(engine.GetRecommendations(customerId));
 });
 
 app.MapFallbackToFile("index.html");

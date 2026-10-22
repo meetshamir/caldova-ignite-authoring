@@ -36,7 +36,7 @@ async function renderDashboard() {
     <section class="grid">
       <article class="card"><h2>Checkout</h2><p class="meta">Order checkout flow. Visit <a href="#/checkout">Checkout</a>.</p></article>
       <article class="card"><h2>Search</h2><p class="meta">Product search. Visit <a href="#/search">Search</a>.</p></article>
-      <article class="card"><h2>Reports</h2><p class="meta">Sales reporting. Visit <a href="#/reports">Reports</a>.</p></article>
+      <article class="card"><h2>Reports</h2><p class="meta">Daily sales reporting. Visit <a href="#/reports">Reports</a>.</p></article>
       <article class="card"><h2>Recommendations</h2><p class="meta">Personalized recommendations. Visit <a href="#/recommendations">Recommendations</a>.</p></article>
     </section>`;
   try {
@@ -44,8 +44,7 @@ async function renderDashboard() {
     document.getElementById("status").innerHTML = [
       [`${status.uptimeSeconds}s`, "Uptime"],
       [status.dotnetVersion, ".NET runtime"],
-      [status.instance, "Instance"],
-      [status.reportsCached, "Reports cached"]
+      [status.instance, "Instance"]
     ].map(([value, label]) => `<div class="metric"><strong>${escapeHtml(value)}</strong><span>${label}</span></div>`).join("");
   } catch (error) {
     document.getElementById("status").innerHTML = `<span class="error">Caldova status is unavailable: ${escapeHtml(error.message)}</span>`;
@@ -66,50 +65,73 @@ async function renderCheckout() {
   }
 }
 
-async function renderSearch() {
-  app.innerHTML = `<section class="panel">Searching&hellip;</section>`;
-  try {
-    const result = await getJson("/api/search");
-    app.innerHTML = `<section class="panel">
-      <h2>Search results</h2>
-      <p class="meta">${result.products.length} products found${result.delayMs > 0 ? ` (artificial delay: ${result.delayMs}ms)` : ""}.</p>
-      <div class="grid">${result.products.map((product) =>
-        `<article class="card"><h2>${escapeHtml(product.name)}</h2><p class="meta">SKU ${escapeHtml(product.sku)} &middot; $${escapeHtml(product.price.toFixed(2))}</p></article>`
-      ).join("")}</div>
-    </section>`;
-  } catch (error) {
-    app.innerHTML = errorPanel(error.status || 500, "Search is unavailable", error.message);
-  }
+function renderSearch() {
+  app.innerHTML = `<section class="panel">
+    <h2>Search</h2>
+    <p class="meta">Browse the catalog page by page.</p>
+    <form id="search-form"><input id="search-page" type="text" placeholder="Page (e.g. 1)" value="1"> <button type="submit">Search</button></form>
+    <div id="search-results"></div>
+  </section>`;
+  document.getElementById("search-form").addEventListener("submit", async (event) => {
+    event.preventDefault();
+    const page = document.getElementById("search-page").value;
+    const results = document.getElementById("search-results");
+    results.innerHTML = `<p class="meta">Searching&hellip;</p>`;
+    try {
+      const result = await getJson(`/api/search?page=${encodeURIComponent(page)}`);
+      results.innerHTML = `<p class="meta">Page ${escapeHtml(result.page)} of results.</p>
+        <div class="grid">${result.products.map((product) =>
+          `<article class="card"><h2>${escapeHtml(product.name)}</h2><p class="meta">SKU ${escapeHtml(product.sku)} &middot; $${escapeHtml(product.price.toFixed(2))}</p></article>`
+        ).join("")}</div>`;
+    } catch (error) {
+      results.innerHTML = errorPanel(error.status || 500, "Search failed", error.message);
+    }
+  });
 }
 
-async function renderReports() {
-  app.innerHTML = `<section class="panel">Loading report&hellip;</section>`;
-  try {
-    const report = await getJson("/api/reports");
-    app.innerHTML = `<section class="panel">
-      <h2>Sales report</h2>
-      <p>Last ${escapeHtml(report.periodDays)} days: ${escapeHtml(report.orders)} orders, $${escapeHtml(report.revenue.toFixed(2))} revenue.</p>
-      <p class="meta">Cached report buffers held in memory: <code>${escapeHtml(report.reportsCached)}</code></p>
-    </section>`;
-  } catch (error) {
-    app.innerHTML = errorPanel(error.status || 500, "Reports unavailable", error.message);
-  }
+function renderReports() {
+  app.innerHTML = `<section class="panel">
+    <h2>Daily sales report</h2>
+    <p class="meta">1 = Monday &hellip; 7 = Sunday.</p>
+    <form id="reports-form"><input id="reports-day" type="text" placeholder="Day (1-7)" value="1"> <button type="submit">View</button></form>
+    <div id="reports-results"></div>
+  </section>`;
+  document.getElementById("reports-form").addEventListener("submit", async (event) => {
+    event.preventDefault();
+    const day = document.getElementById("reports-day").value;
+    const results = document.getElementById("reports-results");
+    results.innerHTML = `<p class="meta">Loading&hellip;</p>`;
+    try {
+      const report = await getJson(`/api/reports?day=${encodeURIComponent(day)}`);
+      results.innerHTML = `<p>Day ${escapeHtml(report.day)}: $${escapeHtml(report.sales)} in sales.</p>`;
+    } catch (error) {
+      results.innerHTML = errorPanel(error.status || 500, "Report unavailable", error.message);
+    }
+  });
 }
 
-async function renderRecommendations() {
-  app.innerHTML = `<section class="panel">Loading recommendations&hellip;</section>`;
-  try {
-    const result = await getJson("/api/recommendations");
-    app.innerHTML = `<section class="panel">
-      <h2>Recommended for you</h2>
-      <p class="meta">Based on recent purchases.</p>
-      <div class="grid">${result.items.map((item) =>
-        `<article class="card"><h2>${escapeHtml(item.name)}</h2><p class="meta">SKU ${escapeHtml(item.sku)} &middot; $${escapeHtml(item.price.toFixed(2))}</p></article>`
-      ).join("")}</div>
-    </section>`;
-  } catch (error) {
-    app.innerHTML = errorPanel(error.status || 404, "Recommendations not found", error.message);
-  }
+function renderRecommendations() {
+  app.innerHTML = `<section class="panel">
+    <h2>Recommended for you</h2>
+    <p class="meta">Enter a customer ID to see their personalized recommendations.</p>
+    <form id="recommendations-form"><input id="recommendations-customer" type="text" placeholder="Customer ID (e.g. RETURNING-0001)" value="RETURNING-0001"> <button type="submit">Load</button></form>
+    <div id="recommendations-results"></div>
+  </section>`;
+  document.getElementById("recommendations-form").addEventListener("submit", async (event) => {
+    event.preventDefault();
+    const customerId = document.getElementById("recommendations-customer").value;
+    const results = document.getElementById("recommendations-results");
+    results.innerHTML = `<p class="meta">Loading&hellip;</p>`;
+    try {
+      const result = await getJson(`/api/recommendations?customerId=${encodeURIComponent(customerId)}`);
+      results.innerHTML = `<p class="meta">Segment: ${escapeHtml(result.segment)}</p>
+        <div class="grid">${result.items.map((item) =>
+          `<article class="card"><h2>${escapeHtml(item.name)}</h2><p class="meta">SKU ${escapeHtml(item.sku)} &middot; $${escapeHtml(item.price.toFixed(2))}</p></article>`
+        ).join("")}</div>`;
+    } catch (error) {
+      results.innerHTML = errorPanel(error.status || 500, "Recommendations unavailable", error.message);
+    }
+  });
 }
 
 const routes = {
