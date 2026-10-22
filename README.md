@@ -32,17 +32,32 @@ Then open `http://localhost:5000` (or the URL printed on startup).
 | `GET /api/reports?day=`     | Daily sales report (1=Mon ... 7=Sun)  |
 | `GET /api/recommendations?customerId=` | Personalized recommendations |
 
-## Incident scenario 1 — configuration (App Setting)
+## Incident scenario 1 — configuration (App Setting), partial outage
 
-| App Setting      | Value | Effect                                       |
-|-------------------|------|-----------------------------------------------|
-| `BreakMyWebApp`   | `1`  | `GET /api/checkout` returns HTTP 500          |
+Product search is backed by a dated "catalog wave" model
+(`Data/catalog-waves.json`): merchandising stages future catalog refreshes
+ahead of their launch date, and the app shows whichever wave's effective
+date has arrived. The App Setting `Catalog:AsOfDate` (env var
+`Catalog__AsOfDate`) controls what date the catalog considers "now" — it's
+normally left unset (defaults to the real current date).
 
-This is the one purely config-driven scenario in the lab: set the App
-Setting in the Azure Portal (or CLI) to break checkout, and remove it to
-fix. Good as a warm-up incident — the agent should recognize this is a
-configuration regression (e.g. correlate with a recent App Setting change)
-and remediate without touching code.
+| App Setting            | Value          | Effect |
+|-------------------------|----------------|--------|
+| `Catalog__AsOfDate`      | *(unset)*      | Healthy — current "Spring Restock 2026" wave is active |
+| `Catalog__AsOfDate`      | `2026-12-15`   | `GET /api/search` returns HTTP 500 for every request |
+
+**Story:** someone on merchandising meant to preview the upcoming "Holiday
+Preview 2026" wave for stakeholders and set `Catalog__AsOfDate` to a date
+after that wave's effective date — but the holiday catalog's product list
+hasn't been populated yet (`products: null` in the data file), so every
+catalog/search request now throws a `NullReferenceException`. Checkout,
+reports, and recommendations are completely unaffected — this is a
+realistic *partial* outage limited to one feature, not a site-wide flag.
+
+Good as a warm-up incident: the agent should recognize this is a
+configuration regression (correlate the onset with a recent App Setting
+change), and the fix is just removing/correcting `Catalog__AsOfDate` — no
+code change needed.
 
 ## Incident scenarios 2-4 — real code bugs (require a PR to fix)
 

@@ -7,6 +7,7 @@
 using CaldovaRetailOps.Services;
 
 var builder = WebApplication.CreateBuilder(args);
+builder.Services.AddSingleton<CatalogService>();
 builder.Services.AddSingleton<RecommendationEngine>();
 builder.Services.AddSingleton<SearchService>();
 builder.Services.AddSingleton<ReportingService>();
@@ -26,9 +27,6 @@ app.Use(async (context, next) =>
 app.UseDefaultFiles();
 app.UseStaticFiles();
 
-static bool IsFlagOn(string name) =>
-    Environment.GetEnvironmentVariable(name) is "1" or "true";
-
 // ---------------------------------------------------------------------------
 // API routes
 // ---------------------------------------------------------------------------
@@ -46,26 +44,11 @@ app.MapGet("/api/status", () => Results.Json(new
     service = Service,
     uptimeSeconds = (int)(DateTimeOffset.UtcNow - startedAt).TotalSeconds,
     dotnetVersion = Environment.Version.ToString(),
-    instance = Environment.GetEnvironmentVariable("WEBSITE_INSTANCE_ID") is { Length: > 0 } id ? id[..Math.Min(8, id.Length)] : "local",
-    flags = new
-    {
-        BreakMyWebApp = Environment.GetEnvironmentVariable("BreakMyWebApp")
-    }
+    instance = Environment.GetEnvironmentVariable("WEBSITE_INSTANCE_ID") is { Length: > 0 } id ? id[..Math.Min(8, id.Length)] : "local"
 }));
 
 app.MapGet("/api/checkout", () =>
-{
-    // Demo scenario: set the App Setting BreakMyWebApp=1 to make checkout
-    // fail with an HTTP 500, without any code change or redeploy. This is
-    // the one purely-configuration-driven scenario in this app.
-    if (IsFlagOn("BreakMyWebApp"))
-    {
-        Console.Error.WriteLine($"caldova_checkout_failed service={Service} reason=BreakMyWebApp_app_setting_enabled");
-        return Results.Json(new { error = "checkout_failed", detail = "An unexpected error occurred while processing your order." }, statusCode: 500);
-    }
-
-    return Results.Json(new { orderId = "CAL-10482", items = 3, total = 142.50, status = "confirmed" });
-});
+    Results.Json(new { orderId = "CAL-10482", items = 3, total = 142.50, status = "confirmed" }));
 
 app.MapGet("/api/search", (HttpRequest request, SearchService search) =>
     Results.Json(search.Search(request.Query["page"].ToString())));

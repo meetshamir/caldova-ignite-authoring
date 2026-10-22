@@ -1,0 +1,19 @@
+[
+  {
+    "label": "Spring Restock 2026",
+    "effectiveDate": "2026-01-01",
+    "products": [
+      { "sku": "CAL-001", "name": "Trail Runner Boot", "price": 89.00 },
+      { "sku": "CAL-014", "name": "Alpine Shell Jacket", "price": 210.00 },
+      { "sku": "CAL-027", "name": "Summit Pack 28L", "price": 129.00 },
+      { "sku": "CAL-033", "name": "Ridge Fleece Pullover", "price": 74.50 },
+      { "sku": "CAL-041", "name": "Basecamp Thermal Mug", "price": 24.00 },
+      { "sku": "CAL-058", "name": "Switchback Trekking Poles", "price": 59.00 }
+    ]
+  },
+  {
+    "label": "Holiday Preview 2026",
+    "effectiveDate": "2026-12-01",
+    "products": null
+  }
+]

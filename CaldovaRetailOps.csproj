@@ -9,4 +9,11 @@
          the ASP.NET Core shared framework that ships with the SDK/runtime. -->
   </PropertyGroup>
 
+  <ItemGroup>
+    <Content Update="Data\catalog-waves.json">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+      <CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
+    </Content>
+  </ItemGroup>
+
 </Project>

@@ -79,7 +79,7 @@ function renderSearch() {
     results.innerHTML = `<p class="meta">Searching&hellip;</p>`;
     try {
       const result = await getJson(`/api/search?page=${encodeURIComponent(page)}`);
-      results.innerHTML = `<p class="meta">Page ${escapeHtml(result.page)} of results.</p>
+      results.innerHTML = `<p class="meta">Page ${escapeHtml(result.page)} of ${escapeHtml(result.totalCount)} items &middot; catalog: ${escapeHtml(result.catalogWave)}</p>
         <div class="grid">${result.products.map((product) =>
           `<article class="card"><h2>${escapeHtml(product.name)}</h2><p class="meta">SKU ${escapeHtml(product.sku)} &middot; $${escapeHtml(product.price.toFixed(2))}</p></article>`
         ).join("")}</div>`;
