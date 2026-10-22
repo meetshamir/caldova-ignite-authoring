@@ -1,17 +1,16 @@
 # Caldova Retail Ops
 
-A minimal web app used as an Azure App Service SRE Agent demo lab.
+Caldova Retail Co. designs and sells gear for trail, camp, and everyday
+adventure. This repository is the storefront and lightweight operations
+dashboard our team uses to browse the product catalog, search for items,
+review daily sales, and manage checkout and recommendations.
 
 ## Architecture
 
-- **Backend**: ASP.NET Core Web API (C#, `net8.0`), minimal APIs, no NuGet
-  package references beyond the ASP.NET Core shared framework.
-- **Frontend**: Static HTML/CSS/JS served from `wwwroot/` (no npm, no build
-  step) calling the backend's JSON endpoints.
-- Both are hosted together as a single ASP.NET Core app, deployed as one
-  Azure App Service site via **Run From Package (Run From Zip)**. The
-  running site's code cannot be modified in place — the only way to ship a
-  fix is to merge a pull request and publish a new package.
+- **Backend**: ASP.NET Core Web API (C#, `net8.0`), minimal APIs.
+- **Frontend**: Static HTML/CSS/JS served from `wwwroot/`, calling the
+  backend's JSON endpoints.
+- Both are hosted together as a single ASP.NET Core app.
 
 ## Running locally
 
@@ -21,130 +20,28 @@ dotnet run
 
 Then open `http://localhost:5000` (or the URL printed on startup).
 
+## Features
+
+- **Catalog** — browse the full product catalog in a paginated table, or
+  search for a product by name.
+- **Checkout** — view a simulated order confirmation.
+- **Reports** — daily sales summaries.
+- **Recommendations** — personalized product suggestions for a given
+  customer.
+- **About / Contact** — general store information.
+
 ## API endpoints
 
-| Route                      | Description                          |
-|-----------------------------|----------------------------------------|
-| `GET /api/health`           | Liveness check                        |
-| `GET /api/status`           | Uptime, runtime info, active flags    |
-| `GET /api/checkout`         | Simulated checkout                    |
-| `GET /api/search?page=`     | Paginated catalog search              |
-| `GET /api/reports?day=`     | Daily sales report (1=Mon ... 7=Sun)  |
-| `GET /api/recommendations?customerId=` | Personalized recommendations |
-
-## Incident scenario 1 — configuration (App Setting), partial outage
-
-Product search is backed by a dated "catalog wave" model
-(`Data/catalog-waves.json`): merchandising stages future catalog refreshes
-ahead of their launch date, and the app shows whichever wave's effective
-date has arrived. The App Setting `Catalog:AsOfDate` (env var
-`Catalog__AsOfDate`) controls what date the catalog considers "now" — it's
-normally left unset (defaults to the real current date).
-
-| App Setting            | Value          | Effect |
-|-------------------------|----------------|--------|
-| `Catalog__AsOfDate`      | *(unset)*      | Healthy — current "Spring Restock 2026" wave is active |
-| `Catalog__AsOfDate`      | `2026-12-15`   | `GET /api/search` returns HTTP 500 for every request |
-
-**Story:** someone on merchandising meant to preview the upcoming "Holiday
-Preview 2026" wave for stakeholders and set `Catalog__AsOfDate` to a date
-after that wave's effective date — but the holiday catalog's product list
-hasn't been populated yet (`products: null` in the data file), so every
-catalog/search request now throws a `NullReferenceException`. Checkout,
-reports, and recommendations are completely unaffected — this is a
-realistic *partial* outage limited to one feature, not a site-wide flag.
-
-Good as a warm-up incident: the agent should recognize this is a
-configuration regression (correlate the onset with a recent App Setting
-change), and the fix is just removing/correcting `Catalog__AsOfDate` — no
-code change needed.
-
-## Incident scenarios 2-4 — real code bugs (require a PR to fix)
-
-These are not toggled by any setting — they are always present in the
-deployed code and only reproduce for specific, realistic inputs. Because the
-site runs from a fixed, immutable package, the agent cannot fix these by
-changing configuration: it has to read the source in GitHub, find the root
-cause, and open a pull request. (Merging the PR and publishing a new
-package is a separate, manual step for this lab — see "Publishing a new
-package" below.)
-
-### Scenario 2 — New customers can't load recommendations
-
-**Symptom:** Customers who just created an account get an error loading
-their personalized recommendations, while existing customers are fine.
-
-**Reproduce:**
-```
-GET /api/recommendations?customerId=NEW-123
-```
-(Any customer ID starting with `NEW-` reproduces it; try `customerId=RETURNING-0001`
-first to see the healthy path.)
-
-**Investigation path:** Check the exception captured in App Service logs /
-Application Insights for the failing request, then look at
-`Services/RecommendationEngine.cs` on GitHub to find why this particular
-customer segment fails while others succeed.
-
-### Scenario 3 — Search breaks on an unexpected page value
-
-**Symptom:** Product search works for ordinary pagination, but some
-real-world traffic to the search endpoint results in a server error.
-
-**Reproduce:**
-```
-GET /api/search?page=two
-```
-(Compare with `page=1`, which works.)
-
-**Investigation path:** Check the exception type and message, then review
-`Services/SearchService.cs` to find the missing input validation.
-
-### Scenario 4 — End-of-week sales report crashes
-
-**Symptom:** The daily sales report works for most days of the week, but
-one specific, perfectly valid day consistently errors out.
-
-**Reproduce:**
-```
-GET /api/reports?day=7
-```
-(Compare with `day=1` through `day=6`, which work.)
-
-**Investigation path:** Check the exception, then review
-`Services/ReportingService.cs` for how the day parameter is used to look up
-sales data.
-
-## Azure deployment
-
-| Resource | Name |
-|----------|------|
-| Resource group | `rg-ignite2026-sreagent-demo` |
-| Demo Web App (runs the app, `WEBSITE_RUN_FROM_PACKAGE`) | `ignite2026-sreagent-app` |
-| File-host Web App (serves `webapp.zip` from its `wwwroot`) | `ignite2026-sreagent-demo` |
-
-The demo Web App has its `WEBSITE_RUN_FROM_PACKAGE` App Setting pointed at
-`https://ignite2026-sreagent-demo-cfgsgac8h8abh2d9.westus3-01.azurewebsites.net/webapp.zip`,
-which is hosted as a plain file in the file-host site's `wwwroot/`. The demo
-app's own code is therefore never writable in place — it only reads a zip
-over HTTPS — which is what makes the "agent can't just hot-patch the
-running site" constraint real for this lab.
-
-## Publishing a new package
-
-`scripts/publish-webapp-zip.ps1` builds this repo, zips the publish output,
-and uploads it to the file-host site's `wwwroot/webapp.zip` via the Kudu VFS
-API (authenticated with your own `az login` session — no secrets are stored
-anywhere). Use it after merging a fix PR to actually ship the change:
-
-```powershell
-.\scripts\publish-webapp-zip.ps1 `
-    -ResourceGroup rg-ignite2026-sreagent-demo `
-    -FileHostSiteName ignite2026-sreagent-demo `
-    -DemoSiteName ignite2026-sreagent-app `
-    -RestartSite
-```
-
-`-RestartSite` restarts the demo Web App afterward so it reloads the new
-package immediately; omit it if you'd rather let the app pick it up on its
-own next restart/scale event.
+| Route                                   | Description                          |
+|------------------------------------------|----------------------------------------|
+| `GET /api/health`                        | Liveness check                        |
+| `GET /api/status`                        | Uptime and runtime info               |
+| `GET /api/checkout`                      | Simulated checkout                    |
+| `GET /api/search?page=`                  | Paginated catalog browse              |
+| `GET /api/search/by-name?name=&page=`    | Search the catalog by product name    |
+| `GET /api/reports?day=`                  | Daily sales report (1=Mon ... 7=Sun)  |
+| `GET /api/recommendations?customerId=`   | Personalized recommendations          |
+| `GET /api/ping`                          | Simple liveness/load endpoint         |
+| `GET /api/version`                       | Service/runtime version info          |
+| `GET /api/store-locator?zip=`            | Nearby store lookup                   |
+| `GET /api/inventory-summary`             | Warehouse inventory summary           |

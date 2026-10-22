@@ -65,24 +65,52 @@ async function renderCheckout() {
   }
 }
 
+function productsTable(products) {
+  return `<table class="data-table">
+    <thead><tr><th>SKU</th><th>Name</th><th>Price</th></tr></thead>
+    <tbody>${products.map((product) =>
+      `<tr><td>${escapeHtml(product.sku)}</td><td>${escapeHtml(product.name)}</td><td>$${escapeHtml(product.price.toFixed(2))}</td></tr>`
+    ).join("")}</tbody>
+  </table>`;
+}
+
 function renderSearch() {
   app.innerHTML = `<section class="panel">
-    <h2>Search</h2>
-    <p class="meta">Browse the catalog page by page.</p>
-    <form id="search-form"><input id="search-page" type="text" placeholder="Page (e.g. 1)" value="1"> <button type="submit">Search</button></form>
-    <div id="search-results"></div>
+    <h2>Catalog</h2>
+    <p class="meta">Browse the full product catalog, 20 items per page.</p>
+    <form id="browse-form"><input id="browse-page" type="text" placeholder="Page (e.g. 1)" value="1"> <button type="submit">Browse</button></form>
+    <div id="browse-results"></div>
+  </section>
+  <section class="panel">
+    <h2>Search by product name</h2>
+    <form id="namesearch-form"><input id="namesearch-query" type="text" placeholder="e.g. Trail Jacket"> <button type="submit">Search</button></form>
+    <div id="namesearch-results"></div>
   </section>`;
-  document.getElementById("search-form").addEventListener("submit", async (event) => {
+
+  document.getElementById("browse-form").addEventListener("submit", async (event) => {
     event.preventDefault();
-    const page = document.getElementById("search-page").value;
-    const results = document.getElementById("search-results");
-    results.innerHTML = `<p class="meta">Searching&hellip;</p>`;
+    const page = document.getElementById("browse-page").value;
+    const results = document.getElementById("browse-results");
+    results.innerHTML = `<p class="meta">Loading&hellip;</p>`;
     try {
       const result = await getJson(`/api/search?page=${encodeURIComponent(page)}`);
-      results.innerHTML = `<p class="meta">Page ${escapeHtml(result.page)} of ${escapeHtml(result.totalCount)} items &middot; catalog: ${escapeHtml(result.catalogWave)}</p>
-        <div class="grid">${result.products.map((product) =>
-          `<article class="card"><h2>${escapeHtml(product.name)}</h2><p class="meta">SKU ${escapeHtml(product.sku)} &middot; $${escapeHtml(product.price.toFixed(2))}</p></article>`
-        ).join("")}</div>`;
+      results.innerHTML = `<p class="meta">Page ${escapeHtml(result.page)} &middot; ${escapeHtml(result.totalCount)} products total</p>
+        ${productsTable(result.products)}`;
+    } catch (error) {
+      results.innerHTML = errorPanel(error.status || 500, "Catalog unavailable", error.message);
+    }
+  });
+  document.getElementById("browse-form").dispatchEvent(new Event("submit"));
+
+  document.getElementById("namesearch-form").addEventListener("submit", async (event) => {
+    event.preventDefault();
+    const query = document.getElementById("namesearch-query").value;
+    const results = document.getElementById("namesearch-results");
+    results.innerHTML = `<p class="meta">Searching&hellip;</p>`;
+    try {
+      const result = await getJson(`/api/search/by-name?name=${encodeURIComponent(query)}`);
+      results.innerHTML = `<p class="meta">${escapeHtml(result.totalCount)} match(es) for "${escapeHtml(result.query)}"</p>
+        ${productsTable(result.products)}`;
     } catch (error) {
       results.innerHTML = errorPanel(error.status || 500, "Search failed", error.message);
     }
