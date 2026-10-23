@@ -103,6 +103,13 @@ public class CatalogService
     {
         var wave = GetActiveSearchIndexWave();
 
+        if (wave.Products is null)
+        {
+            // The active wave's search index hasn't been built yet (staged
+            // future wave). Return zero results instead of crashing.
+            return (wave.Label, 0, new List<CatalogProduct>());
+        }
+
         var matches = wave.Products
             .Where(p => p.Name.Contains(nameQuery, StringComparison.OrdinalIgnoreCase))
             .ToList();
