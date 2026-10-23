@@ -1,0 +1,37 @@
+$targetUser = "@lab.CloudPortalCredential(User1).Username"
+$resourceGroup = "ResourceGroup1"
+$roleId = "e79298df-d852-4c6d-84f9-5d13249d1e55"
+
+Write-Host "Starting native Role Assignment for $targetUser..."
+
+try {
+    # 1. Resolve the user's Entra ID object ID
+    $student = Get-AzADUser `
+        -UserPrincipalName $targetUser `
+        -ErrorAction Stop
+
+    $studentObjectId = $student.Id
+    Write-Host "Resolved Student Object ID: $studentObjectId"
+
+    # 2. Resolve the current subscription and resource-group scope
+    $context = Get-AzContext
+    if (-not $context -or -not $context.Subscription.Id) {
+        throw "No active Azure subscription. Run Connect-AzAccount and Set-AzContext."
+    }
+
+    $subscriptionId = $context.Subscription.Id
+    $scope = "/subscriptions/$subscriptionId/resourceGroups/$resourceGroup"
+
+    # 3. Assign the role at resource-group scope
+    $assign = New-AzRoleAssignment `
+        -ObjectId $studentObjectId `
+        -RoleDefinitionId $roleId `
+        -Scope $scope `
+        -ErrorAction Stop
+
+    Write-Host "Success: SRE Agent Administrator assigned (Assignment ID: $($assign.RoleAssignmentId))"
+}
+catch {
+    Write-Error "Failed to execute role assignment: $_"
+    exit 1
+}
