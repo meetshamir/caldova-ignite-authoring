@@ -40,7 +40,7 @@
 .EXAMPLE
     .\publish-webapp-zip.ps1 -ResourceGroup rg-ignite2026-sreagent-demo `
         -FileHostSiteName ignite2026-sreagent-demo `
-        -DemoSiteName ignite2026-sreagent-app -RestartSite
+        -DemoSiteName caldova-webapp -RestartSite
 #>
 [CmdletBinding()]
 param(
