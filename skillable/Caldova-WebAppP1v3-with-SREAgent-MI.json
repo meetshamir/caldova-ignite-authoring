@@ -1,0 +1,613 @@
+{
+  "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#",
+  "contentVersion": "1.0.0.0",
+  "metadata": {
+    "description": "Skillable deployment with no top-level parameter prompts. Fixed settings are variables. A blocking Post-Build lifecycle action resolves the assigned learner and grants SRE Agent Administrator access; this template does not assign learner access. The SRE Agent managed identity receives Contributor at subscription scope. The deployment principal must be allowed to create role assignments at subscription scope."
+  },
+  "variables": {
+    "location": "swedencentral",
+    "packageUrl": "https://ignite2026-sreagent-demo-cfgsgac8h8abh2d9.westus3-01.azurewebsites.net/webapp.zip",
+    "faultSettingName": "BreakMyWebApp",
+    "faultSettingValue": "1",
+    "availabilityPath": "/YSOD.aspx",
+    "availabilityEnabled": true,
+    "agentLocation": "eastus2",
+    "labSuffix": "[uniqueString(resourceGroup().id)]",
+    "webAppName": "[concat('caldova-webapp-', variables('labSuffix'))]",
+    "planName": "[concat('caldova-plan-', variables('labSuffix'))]",
+    "workspaceName": "[concat('caldova-logs-', variables('labSuffix'))]",
+    "insightsName": "[concat('caldova-insights-', variables('labSuffix'))]",
+    "availabilityName": "[concat('caldova-availability-', variables('labSuffix'))]",
+    "failedRequestAlertName": "[concat('caldova-failed-requests-', variables('labSuffix'))]",
+    "availabilityAlertName": "[concat('caldova-availability-alert-', variables('labSuffix'))]",
+    "tags": {
+      "workload": "caldova-webapp-monitoring",
+      "purpose": "skillable-lab"
+    },
+    "sreDeploymentName": "caldova-sre"
+  },
+  "resources": [
+    {
+      "type": "Microsoft.OperationalInsights/workspaces",
+      "apiVersion": "2026-03-01",
+      "name": "[variables('workspaceName')]",
+      "location": "[variables('location')]",
+      "tags": "[variables('tags')]",
+      "properties": {
+        "sku": { "name": "PerGB2018" },
+        "retentionInDays": 30,
+        "features": { "enableLogAccessUsingOnlyResourcePermissions": true }
+      }
+    },
+    {
+      "type": "Microsoft.Insights/components",
+      "apiVersion": "2020-02-02",
+      "name": "[variables('insightsName')]",
+      "location": "[variables('location')]",
+      "kind": "web",
+      "tags": "[variables('tags')]",
+      "dependsOn": [
+        "[resourceId('Microsoft.OperationalInsights/workspaces', variables('workspaceName'))]"
+      ],
+      "properties": {
+        "Application_Type": "web",
+        "WorkspaceResourceId": "[resourceId('Microsoft.OperationalInsights/workspaces', variables('workspaceName'))]",
+        "IngestionMode": "LogAnalytics",
+        "SamplingPercentage": 100,
+        "publicNetworkAccessForIngestion": "Enabled",
+        "publicNetworkAccessForQuery": "Enabled"
+      }
+    },
+    {
+      "type": "Microsoft.AlertsManagement/smartDetectorAlertRules",
+      "apiVersion": "2021-04-01",
+      "name": "[concat('Failure Anomalies - ', variables('insightsName'))]",
+      "location": "global",
+      "tags": "[variables('tags')]",
+      "dependsOn": [
+        "[resourceId('Microsoft.Insights/components', variables('insightsName'))]"
+      ],
+      "properties": {
+        "description": "Suppress the platform-created anomaly alert and its implicit notification routing; this lab owns two explicit symptom alerts.",
+        "state": "Disabled",
+        "severity": "Sev3",
+        "frequency": "PT1M",
+        "detector": { "id": "FailureAnomaliesDetector" },
+        "scope": [
+          "[resourceId('Microsoft.Insights/components', variables('insightsName'))]"
+        ],
+        "actionGroups": { "groupIds": [] }
+      }
+    },
+    {
+      "type": "Microsoft.Web/serverfarms",
+      "apiVersion": "2026-08-01",
+      "name": "[variables('planName')]",
+      "location": "[variables('location')]",
+      "kind": "app",
+      "tags": "[variables('tags')]",
+      "sku": { "name": "P1v3", "tier": "PremiumV3", "capacity": 1 },
+      "properties": { "reserved": false }
+    },
+    {
+      "type": "Microsoft.Web/sites",
+      "apiVersion": "2026-08-01",
+      "name": "[variables('webAppName')]",
+      "location": "[variables('location')]",
+      "kind": "app",
+      "tags": "[variables('tags')]",
+      "dependsOn": [
+        "[resourceId('Microsoft.Web/serverfarms', variables('planName'))]",
+        "[resourceId('Microsoft.Insights/components', variables('insightsName'))]"
+      ],
+      "properties": {
+        "serverFarmId": "[resourceId('Microsoft.Web/serverfarms', variables('planName'))]",
+        "httpsOnly": true,
+        "clientAffinityEnabled": false,
+        "siteConfig": {
+          "netFrameworkVersion": "v4.0",
+          "use32BitWorkerProcess": false,
+          "alwaysOn": true,
+          "minTlsVersion": "1.2",
+          "scmMinTlsVersion": "1.2",
+          "ftpsState": "Disabled",
+          "httpLoggingEnabled": true,
+          "detailedErrorLoggingEnabled": true,
+          "requestTracingEnabled": true,
+          "appSettings": [
+            { "name": "WEBSITE_RUN_FROM_PACKAGE", "value": "[variables('packageUrl')]" },
+            { "name": "[variables('faultSettingName')]", "value": "[variables('faultSettingValue')]" },
+            { "name": "APPLICATIONINSIGHTS_CONNECTION_STRING", "value": "[reference(resourceId('Microsoft.Insights/components', variables('insightsName')), '2020-02-02').ConnectionString]" },
+            { "name": "ApplicationInsightsAgent_EXTENSION_VERSION", "value": "~2" },
+            { "name": "XDT_MicrosoftApplicationInsights_Mode", "value": "recommended" },
+            { "name": "MicrosoftAppInsights_AdaptiveSamplingTelemetryProcessor_MinSamplingPercentage", "value": "100" }
+          ]
+        }
+      }
+    },
+    {
+      "type": "Microsoft.Web/sites/config",
+      "apiVersion": "2026-08-01",
+      "name": "[concat(variables('webAppName'), '/logs')]",
+      "dependsOn": [
+        "[resourceId('Microsoft.Web/sites', variables('webAppName'))]"
+      ],
+      "properties": {
+        "httpLogs": {
+          "fileSystem": { "enabled": true, "retentionInDays": 3, "retentionInMb": 35 }
+        },
+        "applicationLogs": { "fileSystem": { "level": "Information" } },
+        "detailedErrorMessages": { "enabled": true },
+        "failedRequestsTracing": { "enabled": true }
+      }
+    },
+    {
+      "type": "Microsoft.Insights/diagnosticSettings",
+      "apiVersion": "2021-05-01-preview",
+      "name": "workspace",
+      "scope": "[concat('Microsoft.Web/sites/', variables('webAppName'))]",
+      "dependsOn": [
+        "[resourceId('Microsoft.Web/sites', variables('webAppName'))]",
+        "[resourceId('Microsoft.OperationalInsights/workspaces', variables('workspaceName'))]"
+      ],
+      "properties": {
+        "workspaceId": "[resourceId('Microsoft.OperationalInsights/workspaces', variables('workspaceName'))]",
+        "logAnalyticsDestinationType": "Dedicated",
+        "logs": [
+          { "categoryGroup": "allLogs", "enabled": true }
+        ],
+        "metrics": [
+          { "category": "AllMetrics", "enabled": true }
+        ]
+      }
+    },
+    {
+      "type": "Microsoft.Insights/webtests",
+      "apiVersion": "2022-06-15",
+      "name": "[variables('availabilityName')]",
+      "location": "[variables('location')]",
+      "kind": "standard",
+      "tags": {
+        "[concat('hidden-link:', resourceId('Microsoft.Insights/components', variables('insightsName')))]": "Resource"
+      },
+      "dependsOn": [
+        "[resourceId('Microsoft.Web/sites', variables('webAppName'))]"
+      ],
+      "properties": {
+        "SyntheticMonitorId": "[variables('availabilityName')]",
+        "Name": "[variables('availabilityName')]",
+        "Description": "Probe the package's chosen failure path without fetching dependent assets.",
+        "Enabled": "[variables('availabilityEnabled')]",
+        "Frequency": 300,
+        "Timeout": 30,
+        "Kind": "standard",
+        "RetryEnabled": false,
+        "Locations": [
+          { "Id": "us-ca-sjc-azr" },
+          { "Id": "us-tx-sn1-azr" },
+          { "Id": "us-va-ash-azr" }
+        ],
+        "Request": {
+          "RequestUrl": "[concat('https://', reference(resourceId('Microsoft.Web/sites', variables('webAppName')), '2026-08-01').defaultHostName, variables('availabilityPath'))]",
+          "HttpVerb": "GET",
+          "FollowRedirects": true,
+          "ParseDependentRequests": false
+        },
+        "ValidationRules": {
+          "ExpectedHttpStatusCode": 200,
+          "IgnoreHttpStatusCode": false,
+          "SSLCheck": true,
+          "SSLCertRemainingLifetimeCheck": 7
+        }
+      }
+    },
+    {
+      "type": "Microsoft.Insights/metricAlerts",
+      "apiVersion": "2026-01-01",
+      "name": "[variables('failedRequestAlertName')]",
+      "location": "global",
+      "tags": "[variables('tags')]",
+      "dependsOn": [
+        "[resourceId('Microsoft.Insights/components', variables('insightsName'))]"
+      ],
+      "properties": {
+        "description": "Total failed server requests strictly greater than 3 over the rolling last 15 minutes, including availability probes that reach the app.",
+        "severity": 2,
+        "enabled": true,
+        "scopes": [
+          "[resourceId('Microsoft.Insights/components', variables('insightsName'))]"
+        ],
+        "evaluationFrequency": "PT1M",
+        "windowSize": "PT15M",
+        "autoMitigate": true,
+        "criteria": {
+          "odata.type": "Microsoft.Azure.Monitor.SingleResourceMultipleMetricCriteria",
+          "allOf": [
+            {
+              "name": "FailedRequests",
+              "criterionType": "StaticThresholdCriterion",
+              "metricNamespace": "microsoft.insights/components",
+              "metricName": "requests/failed",
+              "timeAggregation": "Count",
+              "operator": "GreaterThan",
+              "threshold": 3
+            }
+          ]
+        },
+        "actions": []
+      }
+    },
+    {
+      "type": "Microsoft.Insights/metricAlerts",
+      "apiVersion": "2026-01-01",
+      "name": "[variables('availabilityAlertName')]",
+      "location": "global",
+      "tags": "[variables('tags')]",
+      "dependsOn": [
+        "[resourceId('Microsoft.Insights/webtests', variables('availabilityName'))]"
+      ],
+      "properties": {
+        "description": "The standard availability test fails in at least two of three locations.",
+        "severity": 2,
+        "enabled": "[variables('availabilityEnabled')]",
+        "scopes": [
+          "[resourceId('Microsoft.Insights/webtests', variables('availabilityName'))]",
+          "[resourceId('Microsoft.Insights/components', variables('insightsName'))]"
+        ],
+        "evaluationFrequency": "PT1M",
+        "windowSize": "PT5M",
+        "autoMitigate": true,
+        "criteria": {
+          "odata.type": "Microsoft.Azure.Monitor.WebtestLocationAvailabilityCriteria",
+          "webTestId": "[resourceId('Microsoft.Insights/webtests', variables('availabilityName'))]",
+          "componentId": "[resourceId('Microsoft.Insights/components', variables('insightsName'))]",
+          "failedLocationCount": 2
+        },
+        "actions": []
+      }
+    },
+    {
+      "type": "Microsoft.Resources/deployments",
+      "apiVersion": "2022-09-01",
+      "name": "[variables('sreDeploymentName')]",
+      "dependsOn": [
+        "[resourceId('Microsoft.Web/sites', variables('webAppName'))]",
+        "[resourceId('Microsoft.OperationalInsights/workspaces', variables('workspaceName'))]",
+        "[resourceId('Microsoft.Insights/components', variables('insightsName'))]"
+      ],
+      "properties": {
+        "mode": "Incremental",
+        "expressionEvaluationOptions": { "scope": "inner" },
+        "parameters": {
+          "labSuffix": { "value": "[variables('labSuffix')]" },
+          "agentLocation": { "value": "[variables('agentLocation')]" },
+          "webAppResourceGroupId": { "value": "[resourceGroup().id]" },
+          "webAppResourceId": { "value": "[resourceId('Microsoft.Web/sites', variables('webAppName'))]" },
+          "webAppUrl": { "value": "[concat('https://', reference(resourceId('Microsoft.Web/sites', variables('webAppName')), '2026-08-01').defaultHostName)]" },
+          "logAnalyticsWorkspaceResourceId": { "value": "[resourceId('Microsoft.OperationalInsights/workspaces', variables('workspaceName'))]" },
+          "logAnalyticsWorkspaceCustomerId": { "value": "[reference(resourceId('Microsoft.OperationalInsights/workspaces', variables('workspaceName')), '2026-03-01').customerId]" },
+          "applicationInsightsResourceId": { "value": "[resourceId('Microsoft.Insights/components', variables('insightsName'))]" }
+        },
+        "template": {
+          "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#",
+          "contentVersion": "1.0.0.0",
+          "metadata": {
+            "description": "Investigation-only SRE Agent module. Target subscription and telemetry-specific connector payloads require live validation before Skillable publication.",
+            "documentation": "https://learn.microsoft.com/azure/templates/microsoft.app/agents/connectors"
+          },
+          "parameters": {
+            "labSuffix": {
+              "type": "string",
+              "minLength": 13,
+              "maxLength": 13,
+              "metadata": {
+                "description": "Complete uniqueString result supplied by the application template; never recomputed here."
+              }
+            },
+            "agentLocation": {
+              "type": "string",
+              "minLength": 1,
+              "metadata": {
+                "description": "Region supported for Microsoft.App/agents in the target subscription."
+              }
+            },
+            "webAppResourceGroupId": {
+              "type": "string",
+              "metadata": {
+                "description": "Full ARM resource group ID. This is the agent's only managed resource scope."
+              }
+            },
+            "webAppResourceId": {
+              "type": "string",
+              "metadata": {
+                "description": "Full Microsoft.Web/sites ARM resource ID."
+              }
+            },
+            "webAppUrl": {
+              "type": "string",
+              "metadata": {
+                "description": "Actual HTTPS URL returned by the application deployment, not a constructed hostname."
+              }
+            },
+            "logAnalyticsWorkspaceResourceId": {
+              "type": "string",
+              "metadata": {
+                "description": "Full Microsoft.OperationalInsights/workspaces ARM resource ID."
+              }
+            },
+            "logAnalyticsWorkspaceCustomerId": {
+              "type": "string",
+              "minLength": 36,
+              "maxLength": 36,
+              "metadata": {
+                "description": "Workspace customer GUID, not its ARM resource ID."
+              }
+            },
+            "applicationInsightsResourceId": {
+              "type": "string",
+              "metadata": {
+                "description": "Full ARM resource ID of the workspace-based Microsoft.Insights/components resource."
+              }
+            }
+          },
+          "variables": {
+            "agentName": "[concat('caldova-sreagent-', parameters('labSuffix'))]",
+            "identityName": "[concat('caldova-sre-mi-', parameters('labSuffix'))]",
+            "identityId": "[resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', variables('identityName'))]",
+            "agentId": "[resourceId('Microsoft.App/agents', variables('agentName'))]",
+            "subscriptionPermissionsDeploymentName": "[concat('sre-sub-permissions-', guid(variables('identityId'), split(parameters('webAppResourceGroupId'), '/')[2]))]",
+            "subscriptionPermissionsDeploymentId": "[subscriptionResourceId(split(parameters('webAppResourceGroupId'), '/')[2], 'Microsoft.Resources/deployments', variables('subscriptionPermissionsDeploymentName'))]",
+            "permissionTargets": [
+              {
+                "scopeId": "[parameters('logAnalyticsWorkspaceResourceId')]",
+                "roleId": "3b03c2da-16b3-4a49-8834-0f8130efdd3b"
+              },
+              {
+                "scopeId": "[parameters('applicationInsightsResourceId')]",
+                "roleId": "acdd72a7-3385-48ef-bd42-f606fba81ae7"
+              }
+            ]
+          },
+          "resources": [
+            {
+              "type": "Microsoft.ManagedIdentity/userAssignedIdentities",
+              "apiVersion": "2023-01-31",
+              "name": "[variables('identityName')]",
+              "location": "[parameters('agentLocation')]"
+            },
+            {
+              "type": "Microsoft.Resources/deployments",
+              "apiVersion": "2022-09-01",
+              "name": "[variables('subscriptionPermissionsDeploymentName')]",
+              "subscriptionId": "[split(parameters('webAppResourceGroupId'), '/')[2]]",
+              "location": "[parameters('agentLocation')]",
+              "dependsOn": ["[variables('identityId')]"],
+              "properties": {
+                "mode": "Incremental",
+                "expressionEvaluationOptions": { "scope": "inner" },
+                "parameters": {
+                  "principalId": {
+                    "value": "[reference(variables('identityId'), '2023-01-31').principalId]"
+                  }
+                },
+                "template": {
+                  "$schema": "https://schema.management.azure.com/schemas/2018-05-01/subscriptionDeploymentTemplate.json#",
+                  "contentVersion": "1.0.0.0",
+                  "parameters": {
+                    "principalId": { "type": "string" }
+                  },
+                  "resources": [
+                    {
+                      "type": "Microsoft.Authorization/roleAssignments",
+                      "apiVersion": "2022-04-01",
+                      "name": "[guid(toLower(subscription().id), parameters('principalId'), 'b24988ac-6180-42a0-ab88-20f7382dd24c')]",
+                      "properties": {
+                        "roleDefinitionId": "[subscriptionResourceId('Microsoft.Authorization/roleDefinitions', 'b24988ac-6180-42a0-ab88-20f7382dd24c')]",
+                        "principalId": "[parameters('principalId')]",
+                        "principalType": "ServicePrincipal"
+                      }
+                    }
+                  ]
+                }
+              }
+            },
+            {
+              "type": "Microsoft.Resources/deployments",
+              "apiVersion": "2022-09-01",
+              "name": "[concat('sre-permissions-', guid(variables('identityId'), variables('permissionTargets')[copyIndex()].scopeId))]",
+              "subscriptionId": "[split(variables('permissionTargets')[copyIndex()].scopeId, '/')[2]]",
+              "resourceGroup": "[split(variables('permissionTargets')[copyIndex()].scopeId, '/')[4]]",
+              "copy": {
+                "name": "labPermissions",
+                "count": "[length(variables('permissionTargets'))]"
+              },
+              "dependsOn": [
+                "[variables('identityId')]"
+              ],
+              "properties": {
+                "mode": "Incremental",
+                "expressionEvaluationOptions": {
+                  "scope": "inner"
+                },
+                "parameters": {
+                  "scopeId": {
+                    "value": "[variables('permissionTargets')[copyIndex()].scopeId]"
+                  },
+                  "principalId": {
+                    "value": "[reference(variables('identityId'), '2023-01-31').principalId]"
+                  },
+                  "roleId": {
+                    "value": "[variables('permissionTargets')[copyIndex()].roleId]"
+                  }
+                },
+                "template": {
+                  "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#",
+                  "contentVersion": "1.0.0.0",
+                  "parameters": {
+                    "scopeId": {
+                      "type": "string"
+                    },
+                    "principalId": {
+                      "type": "string"
+                    },
+                    "roleId": {
+                      "type": "string"
+                    }
+                  },
+                  "resources": [
+                    {
+                      "type": "Microsoft.Authorization/roleAssignments",
+                      "apiVersion": "2022-04-01",
+                      "name": "[guid(toLower(parameters('scopeId')), parameters('principalId'), parameters('roleId'))]",
+                      "scope": "[parameters('scopeId')]",
+                      "properties": {
+                        "roleDefinitionId": "[subscriptionResourceId('Microsoft.Authorization/roleDefinitions', parameters('roleId'))]",
+                        "principalId": "[parameters('principalId')]",
+                        "principalType": "ServicePrincipal"
+                      }
+                    }
+                  ]
+                }
+              }
+            },
+            {
+              "type": "Microsoft.App/agents",
+              "apiVersion": "2026-01-01",
+              "name": "[variables('agentName')]",
+              "location": "[parameters('agentLocation')]",
+              "identity": {
+                "type": "UserAssigned",
+                "userAssignedIdentities": {
+                  "[variables('identityId')]": {}
+                }
+              },
+              "dependsOn": [
+                "[variables('identityId')]",
+                "[variables('subscriptionPermissionsDeploymentId')]",
+                "labPermissions"
+              ],
+              "properties": {
+                "knowledgeGraphConfiguration": {
+                  "identity": "[variables('identityId')]",
+                  "managedResources": [
+                    "[parameters('webAppResourceGroupId')]"
+                  ]
+                },
+                "actionConfiguration": {
+                  "identity": "[variables('identityId')]",
+                  "mode": "Review",
+                  "accessLevel": "Low"
+                },
+                "upgradeChannel": "Stable"
+              }
+            },
+            {
+              "type": "Microsoft.App/agents/connectors",
+              "apiVersion": "2026-01-01",
+              "name": "[concat(variables('agentName'), '/lab-log-analytics')]",
+              "dependsOn": [
+                "[variables('agentId')]",
+                "labPermissions"
+              ],
+              "properties": {
+                "dataConnectorType": "LogAnalytics",
+                "dataSource": "[parameters('logAnalyticsWorkspaceResourceId')]",
+                "identity": "[variables('identityId')]",
+                "extendedProperties": {
+                  "workspace": {
+                    "name": "[last(split(parameters('logAnalyticsWorkspaceResourceId'), '/'))]",
+                    "customerId": "[parameters('logAnalyticsWorkspaceCustomerId')]"
+                  }
+                }
+              }
+            },
+            {
+              "type": "Microsoft.App/agents/connectors",
+              "apiVersion": "2026-01-01",
+              "name": "[concat(variables('agentName'), '/lab-application-insights')]",
+              "dependsOn": [
+                "[variables('agentId')]",
+                "labPermissions"
+              ],
+              "properties": {
+                "dataConnectorType": "AppInsights",
+                "dataSource": "[parameters('applicationInsightsResourceId')]",
+                "identity": "[variables('identityId')]",
+                "extendedProperties": {
+                  "armResourceId": "[parameters('applicationInsightsResourceId')]",
+                  "resource": {
+                    "name": "[last(split(parameters('applicationInsightsResourceId'), '/'))]"
+                  },
+                  "appId": "[reference(parameters('applicationInsightsResourceId'), '2020-02-02').AppId]"
+                }
+              }
+            }
+          ],
+          "outputs": {
+            "sreAgentResourceId": {
+              "type": "string",
+              "value": "[variables('agentId')]"
+            },
+            "sreAgentName": {
+              "type": "string",
+              "value": "[variables('agentName')]"
+            },
+            "sreAgentPrincipalId": {
+              "type": "string",
+              "value": "[reference(variables('identityId'), '2023-01-31').principalId]"
+            },
+            "sreAgentIdentityResourceId": {
+              "type": "string",
+              "value": "[variables('identityId')]"
+            },
+            "sreAgentEndpoint": {
+              "type": "string",
+              "value": "[reference(variables('agentId'), '2026-01-01').agentEndpoint]"
+            },
+            "sreAgentAccessUrl": {
+              "type": "string",
+              "value": "[concat('https://sre.azure.com/agents', variables('agentId'))]"
+            },
+            "logAnalyticsConnectorResourceId": {
+              "type": "string",
+              "value": "[resourceId('Microsoft.App/agents/connectors', variables('agentName'), 'lab-log-analytics')]"
+            },
+            "applicationInsightsConnectorResourceId": {
+              "type": "string",
+              "value": "[resourceId('Microsoft.App/agents/connectors', variables('agentName'), 'lab-application-insights')]"
+            },
+            "webAppResourceId": {
+              "type": "string",
+              "value": "[parameters('webAppResourceId')]"
+            },
+            "webAppUrl": {
+              "type": "string",
+              "value": "[parameters('webAppUrl')]"
+            }
+          }
+        }
+      }
+    }
+  ],
+  "outputs": {
+    "labSuffix": { "type": "string", "value": "[variables('labSuffix')]" },
+    "webAppResourceGroupId": { "type": "string", "value": "[resourceGroup().id]" },
+    "webAppResourceId": { "type": "string", "value": "[resourceId('Microsoft.Web/sites', variables('webAppName'))]" },
+    "webAppUrl": { "type": "string", "value": "[concat('https://', reference(resourceId('Microsoft.Web/sites', variables('webAppName')), '2026-08-01').defaultHostName)]" },
+    "logAnalyticsWorkspaceResourceId": { "type": "string", "value": "[resourceId('Microsoft.OperationalInsights/workspaces', variables('workspaceName'))]" },
+    "logAnalyticsWorkspaceCustomerId": { "type": "string", "value": "[reference(resourceId('Microsoft.OperationalInsights/workspaces', variables('workspaceName')), '2026-03-01').customerId]" },
+    "applicationInsightsResourceId": { "type": "string", "value": "[resourceId('Microsoft.Insights/components', variables('insightsName'))]" },
+    "failedRequestAlertResourceId": { "type": "string", "value": "[resourceId('Microsoft.Insights/metricAlerts', variables('failedRequestAlertName'))]" },
+    "availabilityTestResourceId": { "type": "string", "value": "[resourceId('Microsoft.Insights/webtests', variables('availabilityName'))]" },
+    "availabilityAlertResourceId": { "type": "string", "value": "[resourceId('Microsoft.Insights/metricAlerts', variables('availabilityAlertName'))]" },
+    "agentLocation": { "type": "string", "value": "[variables('agentLocation')]" },
+    "sreAgentResourceId": { "type": "string", "value": "[reference(resourceId('Microsoft.Resources/deployments', variables('sreDeploymentName')), '2022-09-01').outputs.sreAgentResourceId.value]" },
+    "sreAgentName": { "type": "string", "value": "[reference(resourceId('Microsoft.Resources/deployments', variables('sreDeploymentName')), '2022-09-01').outputs.sreAgentName.value]" },
+    "sreAgentPrincipalId": { "type": "string", "value": "[reference(resourceId('Microsoft.Resources/deployments', variables('sreDeploymentName')), '2022-09-01').outputs.sreAgentPrincipalId.value]" },
+    "sreAgentIdentityResourceId": { "type": "string", "value": "[reference(resourceId('Microsoft.Resources/deployments', variables('sreDeploymentName')), '2022-09-01').outputs.sreAgentIdentityResourceId.value]" },
+    "sreAgentEndpoint": { "type": "string", "value": "[reference(resourceId('Microsoft.Resources/deployments', variables('sreDeploymentName')), '2022-09-01').outputs.sreAgentEndpoint.value]" },
+    "sreAgentAccessUrl": { "type": "string", "value": "[reference(resourceId('Microsoft.Resources/deployments', variables('sreDeploymentName')), '2022-09-01').outputs.sreAgentAccessUrl.value]" },
+    "logAnalyticsConnectorResourceId": { "type": "string", "value": "[reference(resourceId('Microsoft.Resources/deployments', variables('sreDeploymentName')), '2022-09-01').outputs.logAnalyticsConnectorResourceId.value]" },
+    "applicationInsightsConnectorResourceId": { "type": "string", "value": "[reference(resourceId('Microsoft.Resources/deployments', variables('sreDeploymentName')), '2022-09-01').outputs.applicationInsightsConnectorResourceId.value]" }
+  }
+}
